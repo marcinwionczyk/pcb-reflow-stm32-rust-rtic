@@ -1,0 +1,31 @@
+[package]
+name = "stm32-reflow-rust-rtic"
+version = "0.1.0"
+authors = ["marcin <marcin.wionczyk@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-probe = { version = "0.3.1", features = ["defmt", "print-defmt"] }
+cortex-m-rtic = "1.1"
+debouncr = "0.2.2"
+systick-monotonic = "1.0.1"
+fugit = "0.3.7"
+defmt = "0.3.5"
+defmt-rtt = "0.4.0"
+
+[dependencies.stm32f4xx-hal]
+version = "0.17.1"
+features = ["stm32f411", "rtic", "defmt"]
+
+# Set the default for dependencies.
+[profile.dev.package."*"]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+incremental = false
+debug = true
+lto = true
+opt-level = "s"
