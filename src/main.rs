@@ -7,30 +7,24 @@ mod display;
 // Print panic message to probe console
 use panic_probe as _;
 use defmt_rtt as _;
-use core::mem::MaybeUninit;
 
 const INTERVAL_MS: u32 = 500;
 
-#[rtic::app(device = stm32f4xx_hal::pac, peripherals = true, dispatchers = [SPI1, USART2])]
+#[rtic::app(device = pac, peripherals = true, dispatchers = [SPI1, USART2])]
 mod app {
-    use embedded_hal::blocking::i2c::Write;
-    use embedded_hal::digital::v2::OutputPin;
     use embedded_hal::spi::MODE_0;
     use stm32f4xx_hal::i2c::I2c;
-    use port_expander::I2cBus;
     use stm32f4xx_hal::{
         gpio::{Edge, Input, Output,
-               PA7, PA11, PA12,
+               PA4, PA7, PA11, PA12,
                PB8,
-               PC4, Pin},
+               PC4},
         prelude::*,
         pac,
         i2c,
-        spi,
         timer::MonoTimerUs,
     };
-    use stm32f4xx_hal::dwt::Delay;
-    use stm32f4xx_hal::gpio::Speed;
+    use stm32f4xx_hal::gpio::{NoPin, Speed};
     use stm32f4xx_hal::pac::{I2C1, SPI1};
     use stm32f4xx_hal::spi::Spi;
 
@@ -75,8 +69,6 @@ mod app {
 
     const LCD_MESSAGES_REFLOW_STATUS: &'static [&'static str] = &["Ready", "Pre", "Soak", "Reflow", "Cool", "Done!", "Hot!", "Error"];
 
-    type I2CBus = I2c<I2C1>;
-
     // A monotonic timer to enable scheduling in RTIC
     #[monotonic(binds = TIM2, default = true)]
     type MilisecMono = MonoTimerUs<pac::TIM2>; // 100 Hz / 10 ms granularity
@@ -97,42 +89,54 @@ mod app {
         pcf8574_int_pin: PB8<Input>,
         ssr_pin: PA12<Output>,
         led_pin: PA11<Output>,
+        cs_pin: PA4<Output>,
         i2c: I2c<I2C1>,
-        spi: Spi<SPI1>
+        spi: Spi<SPI1, false, u16>
     }
 
     #[init]
     fn init(mut ctx: init::Context) -> (Shared, Local, init::Monotonics) {
         let mut syscfg = ctx.device.SYSCFG.constrain();
-        let mut rcc = ctx.device.RCC.constrain();
+        let rcc = ctx.device.RCC.constrain();
         let clocks = rcc.cfgr.use_hse(8.MHz()).sysclk(48.MHz()).freeze();
         let mono = ctx.device.TIM2.monotonic_us(&clocks);
         let gpioa = ctx.device.GPIOA.split();
         let gpiob = ctx.device.GPIOB.split();
         let gpioc = ctx.device.GPIOC.split();
+
         let mut pcf8574_int_pin = gpiob.pb8.into_pull_up_input();
         pcf8574_int_pin.make_interrupt_source(&mut syscfg);
         pcf8574_int_pin.enable_interrupt(&mut ctx.device.EXTI);
         pcf8574_int_pin.trigger_on_edge(&mut ctx.device.EXTI, Edge::Falling);
+
         let mut start_stop_button = gpioa.pa7.into_floating_input();
         start_stop_button.make_interrupt_source(&mut syscfg);
         start_stop_button.enable_interrupt(&mut ctx.device.EXTI);
         start_stop_button.trigger_on_edge(&mut ctx.device.EXTI, Edge::Falling);
+
         let mut lf_pb_button = gpioc.pc4.into_floating_input();
         lf_pb_button.make_interrupt_source(&mut syscfg);
         lf_pb_button.enable_interrupt(&mut ctx.device.EXTI);
         lf_pb_button.trigger_on_edge(&mut ctx.device.EXTI, Edge::Falling);
+
         let mut ssr_pin = gpioa.pa12.into_push_pull_output();
+
         let mut led_pin = gpioa.pa11.into_push_pull_output();
+
+        let mut cs_pin = gpioa.pa4.into_push_pull_output();
+        cs_pin.set_high();
+
         let scl = gpiob.pb6.into_alternate_open_drain();
         let sda = gpiob.pb7.into_alternate_open_drain();
         let i2c = ctx.device.I2C1.i2c( (scl, sda),
                            i2c::Mode::Standard { frequency: 50.kHz()},
                            &clocks);
+
         let sck = gpioa.pa5.into_alternate::<5>().speed(Speed::VeryHigh);
         let miso = gpioa.pa6.into_alternate().speed(Speed::VeryHigh);
-        let mosi = gpiob.pb5.into_alternate().speed(Speed::VeryHigh);
-        let mut spi = ctx.device.SPI1.spi((sck, miso, mosi), MODE_0, 1.MHz(), &clocks);
+        let no_mosi = NoPin::new();
+        let mut spi = ctx.device.SPI1.spi((sck, miso, no_mosi), MODE_0, 1.MHz(), &clocks).frame_size_16bit();
+
         defmt::info!("init done!");
         (
             Shared {
@@ -148,6 +152,7 @@ mod app {
                 pcf8574_int_pin,
                 ssr_pin,
                 led_pin,
+                cs_pin,
                 i2c,
                 spi
                 // Initialization of local resources go here
@@ -170,14 +175,27 @@ mod app {
             defmt::info!("start_stop_button pressed");
             ctx.shared.start_stop_pressed.lock(|start_stop_pressed| *start_stop_pressed = true)
         }
+        if ctx.local.pcf8574_int_pin.check_interrupt() {
+            ctx.local.pcf8574_int_pin.clear_interrupt_pending_bit();
+            defmt::info!("pcf8574 interrupt received");
+            ctx.shared.pcf8574_interrupted.lock(|pcf8574_interrupted| *pcf8574_interrupted = true)
+        }
 
     }
 
-    #[task(shared = [temp])]
-    fn read_temp(ctx: read_temp::Context) {
-
+    #[task(shared = [temp], local = [spi, cs_pin])]
+    fn read_temp(mut ctx: read_temp::Context) {
+        let mut spi_value: [u16; 1] = [0];
         defmt::info!("read temp task started");
+        ctx.local.cs_pin.set_low();
+        ctx.local.spi.read(&mut spi_value).unwrap();
+        ctx.local.cs_pin.set_high();
 
+        let input_is_open = (spi_value[0] & 0x4) >> 2;
+        let temp_part = ((spi_value[0] & 0x7FF8) >> 3) as f32;
+        if input_is_open == 0 {
+            ctx.shared.temp.lock(|temp| *temp = 1023.75 * temp_part / 32760.0);
+        }
     }
 
     // Optional idle, can be removed if not needed.
