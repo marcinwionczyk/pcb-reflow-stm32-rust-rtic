@@ -14,6 +14,8 @@ systick-monotonic = "1.0.1"
 fugit = "0.3.7"
 defmt = "0.3.5"
 defmt-rtt = "0.4.0"
+ufmt = "0.2.0"
+embedded-hal = "0.2.7"
 
 [dependencies.stm32f4xx-hal]
 version = "0.17.1"
