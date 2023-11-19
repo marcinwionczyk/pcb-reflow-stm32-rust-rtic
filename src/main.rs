@@ -3,7 +3,6 @@
 #![no_std]
 
 mod display;
-
 // Print panic message to probe console
 use panic_probe as _;
 use defmt_rtt as _;
@@ -12,10 +11,10 @@ const INTERVAL_MS: u32 = 500;
 
 #[rtic::app(device = pac, peripherals = true, dispatchers = [SPI1, USART2])]
 mod app {
+    use crate::display::{TC2004ADriver};
     use embedded_hal::spi::MODE_0;
-    use stm32f4xx_hal::i2c::I2c;
     use stm32f4xx_hal::{
-        gpio::{Edge, Input, Output,
+        gpio::{Edge, Input, Output, Pin,
                PA4, PA7, PA11, PA12,
                PB8,
                PC4},
@@ -25,8 +24,11 @@ mod app {
         timer::MonoTimerUs,
     };
     use stm32f4xx_hal::gpio::{NoPin, Speed};
-    use stm32f4xx_hal::pac::{I2C1, SPI1};
+    use stm32f4xx_hal::i2c::I2c;
+    use stm32f4xx_hal::pac::{I2C1, SPI1, TIM5};
     use stm32f4xx_hal::spi::Spi;
+    use stm32f4xx_hal::timer::DelayUs;
+    use pid::*;
 
     #[derive(PartialEq, Clone, Copy)]
     enum SwitchEnum { None, One, Two }
@@ -90,8 +92,10 @@ mod app {
         ssr_pin: PA12<Output>,
         led_pin: PA11<Output>,
         cs_pin: PA4<Output>,
-        i2c: I2c<I2C1>,
-        spi: Spi<SPI1, false, u16>
+        spi: Spi<SPI1, false, u16>,
+        display: TC2004ADriver<Pin<'C', 14, Output>, Pin<'C', 13, Output>, DelayUs<TIM5>, I2c<I2C1>>,
+        pid_controller: Pid<f32>
+        //pid_controller: Pid<f32>
     }
 
     #[init]
@@ -120,23 +124,32 @@ mod app {
         lf_pb_button.trigger_on_edge(&mut ctx.device.EXTI, Edge::Falling);
 
         let mut ssr_pin = gpioa.pa12.into_push_pull_output();
-
         let mut led_pin = gpioa.pa11.into_push_pull_output();
-
+        led_pin.set_high();
         let mut cs_pin = gpioa.pa4.into_push_pull_output();
         cs_pin.set_high();
-
-        let scl = gpiob.pb6.into_alternate_open_drain();
-        let sda = gpiob.pb7.into_alternate_open_drain();
-        let i2c = ctx.device.I2C1.i2c( (scl, sda),
-                           i2c::Mode::Standard { frequency: 50.kHz()},
-                           &clocks);
 
         let sck = gpioa.pa5.into_alternate::<5>().speed(Speed::VeryHigh);
         let miso = gpioa.pa6.into_alternate().speed(Speed::VeryHigh);
         let no_mosi = NoPin::new();
         let mut spi = ctx.device.SPI1.spi((sck, miso, no_mosi), MODE_0, 1.MHz(), &clocks).frame_size_16bit();
 
+        let en_pin = gpioc.pc13.into_push_pull_output();
+        let rs_pin = gpioc.pc14.into_push_pull_output();
+
+        let scl = gpiob.pb6.into_alternate_open_drain();
+        let sda = gpiob.pb7.into_alternate_open_drain();
+        let i2c = ctx.device.I2C1.i2c( (scl, sda),
+                                       i2c::Mode::Standard { frequency: 50.kHz()},
+                                       &clocks);
+        let delay = ctx.device.TIM5.delay_us(&clocks);
+        let mut display = TC2004ADriver::new(i2c, rs_pin, en_pin, delay).build();
+        display.print("PCB tin paste");
+        display.set_position(0, 1);
+        display.print("reflow controller");
+
+        let mut pid_controller: Pid<f32> = pid::Pid::new(15.0, 100.0);
+        main::spawn_after(2.secs()).unwrap();
         defmt::info!("init done!");
         (
             Shared {
@@ -153,8 +166,9 @@ mod app {
                 ssr_pin,
                 led_pin,
                 cs_pin,
-                i2c,
-                spi
+                spi,
+                display,
+                pid_controller
                 // Initialization of local resources go here
             },
             init::Monotonics(mono),
@@ -198,11 +212,11 @@ mod app {
         }
     }
 
-    // Optional idle, can be removed if not needed.
-    #[idle]
-    fn idle(_: idle::Context) -> ! {
-        loop {
-            continue;
+    #[task(shared = [temp, start_stop_pressed, lf_pb_pressed], local = [display, ssr_pin, led_pin, pid_controller])]
+    fn main(mut ctx: main::Context) {
+        ctx.local.display.clear();
+        ctx.local.led_pin.set_low();
+        loop{
         }
     }
 }

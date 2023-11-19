@@ -162,10 +162,10 @@ const CHR_DELAY: u16 = 450;
 
 const I2C_ADDR: u8 = 0x20;
 
-struct TC2004ADriver<T, D, I> {
+pub struct TC2004ADriver<RS, EN, D, I> {
     i2c: I,
-    rs_pin: T,
-    en_pin: T,
+    rs_pin: RS,
+    en_pin: EN,
     delay: D,
     display_func: u8,
     display_mode: u8,
@@ -173,8 +173,9 @@ struct TC2004ADriver<T, D, I> {
     offsets: [u8; 4],
 }
 
-impl<T, D, I> TC2004ADriver<T, D, I> where I: Write + WriteRead, T: OutputPin, D: DelayUs<u16> {
-    pub fn new(i2c: I, rs_pin: T, en_pin: T, delay: D) -> Self {
+impl<RS, EN, D, I> TC2004ADriver<RS, EN, D, I> where
+    RS: OutputPin, EN: OutputPin, I: Write + WriteRead, D: DelayUs<u16> {
+    pub fn new(i2c: I, rs_pin: RS, en_pin: EN, delay: D) -> Self {
         TC2004ADriver {
             i2c,
             rs_pin,
