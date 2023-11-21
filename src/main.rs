@@ -9,7 +9,7 @@ use defmt_rtt as _;
 
 const INTERVAL_MS: u32 = 500;
 
-#[rtic::app(device = pac, peripherals = true, dispatchers = [SPI1, USART2])]
+#[rtic::app(device = pac, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, EXTI3])]
 mod app {
     use crate::display::{TC2004ADriver};
     use embedded_hal::spi::MODE_0;
@@ -29,12 +29,22 @@ mod app {
     use stm32f4xx_hal::spi::Spi;
     use stm32f4xx_hal::timer::DelayUs;
     use pid::*;
+    use ufmt::{uwrite};
+    use ufmt_float::uFmt_f32;
+    use heapless::{String};
 
     #[derive(PartialEq, Clone, Copy)]
     enum SwitchEnum { None, One, Two }
 
     #[derive(PartialEq)]
     enum ReflowProfileEnum { LeadFree, Leaded }
+
+    #[derive(PartialEq, Clone, Copy)]
+    enum ReflowStateEnum { Idle, Preheat, Soak, Reflow, Cool, Complete, TooHot, Error }
+
+    #[derive(PartialEq)]
+    enum ReflowStatusEnum { Off, On }
+
     // General Profile Constants
     const PROFILE_TYPE_ADDRESS: u16 = 0;
     const TEMPERATURE_ROOM: f32 = 50.0;
@@ -69,7 +79,7 @@ mod app {
     const PID_KI_REFLOW: f32 = 0.05;
     const PID_KD_REFLOW: f32 = 350.0;
 
-    const LCD_MESSAGES_REFLOW_STATUS: &'static [&'static str] = &["Ready", "Pre", "Soak", "Reflow", "Cool", "Done!", "Hot!", "Error"];
+    const LCD_MESSAGES_REFLOW_STATUS: &'static [&'static str] = &["Ready", "Preheat", "Soak", "Reflow", "Cool", "Done!", "Hot!", "Error"];
 
     // A monotonic timer to enable scheduling in RTIC
     #[monotonic(binds = TIM2, default = true)]
@@ -94,8 +104,8 @@ mod app {
         cs_pin: PA4<Output>,
         spi: Spi<SPI1, false, u16>,
         display: TC2004ADriver<Pin<'C', 14, Output>, Pin<'C', 13, Output>, DelayUs<TIM5>, I2c<I2C1>>,
-        pid_controller: Pid<f32>
-        //pid_controller: Pid<f32>
+        pid_controller: Pid<f32>,
+        control_output: ControlOutput<f32>
     }
 
     #[init]
@@ -144,11 +154,12 @@ mod app {
                                        &clocks);
         let delay = ctx.device.TIM5.delay_us(&clocks);
         let mut display = TC2004ADriver::new(i2c, rs_pin, en_pin, delay).build();
-        display.print("PCB tin paste");
+        display.print("Not so tiny");
         display.set_position(0, 1);
         display.print("reflow controller");
-
-        let mut pid_controller: Pid<f32> = pid::Pid::new(15.0, 100.0);
+        display.home();
+        let mut pid_controller: Pid<f32> = Pid::new(0.0, 0.0);
+        let mut control_output: ControlOutput<f32> = ControlOutput { p: 0.0, i: 0.0, d: 0.0, output: 0.0 };
         main::spawn_after(2.secs()).unwrap();
         defmt::info!("init done!");
         (
@@ -168,7 +179,8 @@ mod app {
                 cs_pin,
                 spi,
                 display,
-                pid_controller
+                pid_controller,
+                control_output
                 // Initialization of local resources go here
             },
             init::Monotonics(mono),
@@ -212,11 +224,58 @@ mod app {
         }
     }
 
-    #[task(shared = [temp, start_stop_pressed, lf_pb_pressed], local = [display, ssr_pin, led_pin, pid_controller])]
+    #[task(shared = [temp, start_stop_pressed, lf_pb_pressed], local = [display, ssr_pin, led_pin, pid_controller, control_output])]
     fn main(mut ctx: main::Context) {
-        ctx.local.display.clear();
-        ctx.local.led_pin.set_low();
-        loop{
+        let mut reflow_state = ReflowStateEnum::Idle;
+        let mut reflow_profile = ReflowProfileEnum::Leaded;
+        let mut reflow_status = ReflowStatusEnum::Off;
+
+        let mut next_check = monotonics::now();
+        let mut next_read = monotonics::now();
+        let mut update_lcd = monotonics::now();
+        loop {
+            if monotonics::now() > next_read {
+                next_read += 1.secs();
+                read_temp::spawn().unwrap();
+                if monotonics::now() > next_check {
+                    next_check += 1.secs();
+                    match reflow_status {
+                        ReflowStatusEnum::Off => {
+                            ctx.local.led_pin.set_low()
+                        }
+                        ReflowStatusEnum::On => {
+                            ctx.local.led_pin.toggle();
+                        }
+                    }
+                }
+                if monotonics::now() > update_lcd {
+                    update_lcd += 100.millis();
+                    ctx.local.display.clear();
+                    ctx.local.display.print(LCD_MESSAGES_REFLOW_STATUS[reflow_state as usize]);
+                    ctx.local.display.set_position(18, 0);
+                    match reflow_profile {
+                        ReflowProfileEnum::LeadFree => { ctx.local.display.print("LF"); }
+                        ReflowProfileEnum::Leaded => { ctx.local.display.print("PB"); }
+                    }
+                    ctx.local.display.set_position(0, 1);
+                    match reflow_state {
+                        ReflowStateEnum::Error => {
+                            ctx.local.display.print("TC Error");
+                        }
+                        _ => {
+                            ctx.shared.temp.lock(|temp| {
+                                let mut s: String<20> = String::new();
+                                let temp_write = uFmt_f32::One(*temp);
+                                uwrite!(&mut s, "{}", temp_write).unwrap();
+                                ctx.local.display.print(s.as_str());
+                                ctx.local.display.write(0xDF);
+                                ctx.local.display.write('C' as u8);
+                            });
+
+                        }
+                    }
+                }
+            }
         }
     }
 }

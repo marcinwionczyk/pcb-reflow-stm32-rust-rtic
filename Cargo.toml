@@ -17,6 +17,8 @@ defmt-rtt = "0.4.0"
 ufmt = "0.2.0"
 embedded-hal = "0.2.7"
 pid = { version = "4.0.0", features = ["serde"] }
+heapless = { version = "0.8.0", features = ["ufmt"] }
+ufmt_float = "0.2.0"
 
 [dependencies.stm32f4xx-hal]
 version = "0.17.1"
