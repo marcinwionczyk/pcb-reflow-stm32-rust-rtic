@@ -2,21 +2,6 @@ use stm32f4xx_hal::hal::blocking::delay::DelayUs;
 use stm32f4xx_hal::hal::blocking::i2c::{Write, WriteRead};
 use stm32f4xx_hal::hal::digital::v2::OutputPin;
 
-#[repr(u8)]
-#[derive(Clone, Eq, PartialEq)]
-pub enum Error {
-    /// No pin RS
-    RsPin = 0,
-    /// No pin EN
-    ENPin = 1,
-    /// I2C Error
-    I2C = 2,
-    /// No error
-    /// [Bus mode][crate::display::Mode] is invalid or not set
-    InvalidMode = 3,
-    /// Invalid conversion from u8 to Error
-    InvalidCode = 4,
-}
 
 #[repr(u8)]
 #[allow(dead_code)]
@@ -92,16 +77,6 @@ pub enum Blink {
     Off = 0x00, // LCD_BLINKOFF
 }
 
-
-/// Flag that sets backlight state
-pub enum Backlight {
-    /// Turn Backlight on (default)
-    On,
-
-    /// Turn Backlight off
-    Off,
-}
-
 /// Flag used to indicate direction for display scrolling
 #[repr(u8)]
 pub enum Scroll {
@@ -133,21 +108,6 @@ pub enum Lines {
     /// differentiate between four line mode and two line mode.
     FourLines = 0x0C,
 
-    /// Use two lines if available
-    TwoLines = 0x08, // LCD_2LINE
-
-    /// Use one line (default)
-    OneLine = 0x00, // LCD_1LINE
-}
-
-/// Flag for the character size of the display
-#[repr(u8)]
-pub enum Size {
-    /// Use display with 5x10 characters
-    Dots5x10 = 0x04, // LCD_5x10DOTS
-
-    /// Use display with 5x8 characters (default)
-    Dots5x8 = 0x00, // LCD_5x8DOTS
 }
 
 /// One of the most popular sizes for this kind of LCD is 16x2
@@ -190,21 +150,21 @@ impl<RS, EN, D, I> TC2004ADriver<RS, EN, D, I> where
 
     pub fn send_instruction(&mut self, instruction: u8) {
         self.rs_pin.set_low().ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.i2c.write(I2C_ADDR, &[instruction]).ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.en_pin.set_high().ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.en_pin.set_low().ok();
     }
 
     pub fn send_data(&mut self, value: u8) {
         self.rs_pin.set_high().ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.i2c.write(I2C_ADDR, &[value]).ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.en_pin.set_high().ok();
-        self.delay.delay_us(50);
+        self.delay.delay_us(10);
         self.en_pin.set_low().ok();
     }
 
