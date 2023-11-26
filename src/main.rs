@@ -199,9 +199,9 @@ mod app {
         ctx.local.cs_pin.set_high();
 
         let input_is_open = (spi_value[0] & 0x4) >> 2;
-        let temp_part = ((spi_value[0] & 0x7FF8) >> 3) as f32;
+        let temp_part = (spi_value[0] >> 3) as f32;
         if input_is_open == 0 {
-            ctx.shared.temp.lock(|temp| *temp = temp_part / 3.865546218);
+            ctx.shared.temp.lock(|temp| *temp = temp_part / 4.0);
         }
     }
 

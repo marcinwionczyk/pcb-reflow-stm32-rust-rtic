@@ -121,7 +121,7 @@ pub enum Dots {
 /// One of the most popular sizes for this kind of LCD is 16x2
 const DEFAULT_COLS: u8 = 20;
 
-const DEFAULT_DISPLAY_FUNC: u8 = Mode::EightBits as u8 | Lines::TwoLines as u8 | Dots::FiveTimesEight as u8;
+const DEFAULT_DISPLAY_FUNC: u8 = Mode::EightBits as u8 | Lines::FourLines as u8;
 const DEFAULT_DISPLAY_CTRL: u8 = Display::On as u8 | Cursor::Off as u8 | Blink::Off as u8;
 const DEFAULT_DISPLAY_MODE: u8 = Entry::Left as u8 | EntryShift::Decrement as u8;
 
