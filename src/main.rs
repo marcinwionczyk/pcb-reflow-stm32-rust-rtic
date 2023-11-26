@@ -150,6 +150,8 @@ mod app {
         display.set_position(0, 2);
         display.print("reflow controller");
         display.home();
+        rtic::pend(pac::Interrupt::EXTI4);
+        rtic::pend(pac::Interrupt::EXTI9_5);
         main::spawn_after(2.secs()).unwrap();
         defmt::info!("init done!");
         (
@@ -177,23 +179,23 @@ mod app {
 
     #[task(priority = 3, binds = EXTI4, local = [lf_pb_button], shared = [lf_pb_pressed])]
     fn lf_pb_btn_click(mut ctx: lf_pb_btn_click::Context){
-        ctx.local.lf_pb_button.clear_interrupt_pending_bit();
-        ctx.shared.lf_pb_pressed.lock(|lf_pb_pressed| *lf_pb_pressed = true)
+        if ctx.local.lf_pb_button.check_interrupt() {
+            ctx.local.lf_pb_button.clear_interrupt_pending_bit();
+            ctx.shared.lf_pb_pressed.lock(|lf_pb_pressed| *lf_pb_pressed = true);
+        }
     }
 
     #[task(priority = 3, binds = EXTI9_5, local = [start_stop_button, pcf8574_int_pin], shared = [start_stop_pressed, pcf8574_interrupted])]
     fn exti_9_5_interrupt(mut ctx: exti_9_5_interrupt::Context){
         if ctx.local.start_stop_button.check_interrupt() {
             ctx.local.start_stop_button.clear_interrupt_pending_bit();
-            defmt::info!("start_stop_button pressed");
-            ctx.shared.start_stop_pressed.lock(|start_stop_pressed| *start_stop_pressed = true)
+            ctx.shared.start_stop_pressed.lock(|start_stop_pressed| *start_stop_pressed = true);
         }
     }
 
     #[task(priority = 2, shared = [temp], local = [spi, cs_pin])]
     fn read_temp(mut ctx: read_temp::Context) {
         let mut spi_value: [u16; 1] = [0];
-        defmt::info!("read temp task started");
         ctx.local.cs_pin.set_low();
         ctx.local.spi.read(&mut spi_value).unwrap();
         ctx.local.cs_pin.set_high();
@@ -230,16 +232,23 @@ mod app {
                 if *pressed {
                     switch_status = SwitchEnum::One;
                     *pressed = false;
-                    defmt::info!("start stop button pressed");
                 }
             });
             ctx.shared.lf_pb_pressed.lock(|pressed| {
                 if *pressed {
                     switch_status = SwitchEnum::Two;
                     *pressed = false;
-                    defmt::info!("lf pb button pressed");
                 }
             });
+            match switch_status {
+                SwitchEnum::One => {
+                    defmt::info!("switch_enum one");
+                }
+                SwitchEnum::Two => {
+                    defmt::info!("switch_enum two");
+                }
+                _ => {}
+            }
             if monotonics::now() > next_read {
                 next_read += 1.secs();
                 read_temp::spawn().unwrap();

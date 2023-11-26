@@ -140,7 +140,6 @@ pub struct TC2004ADriver<RS, EN, D, I> {
     offsets: [u8; 4],
     num_lines: u8,
     cols: u8
-
 }
 
 impl<RS, EN, D, I> TC2004ADriver<RS, EN, D, I> where
