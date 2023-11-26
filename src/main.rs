@@ -6,10 +6,10 @@ mod display;
 
 // Print panic message to probe console
 use panic_probe as _;
-use defmt_serial as _;
+use defmt_rtt as _;
 
 
-#[rtic::app(device = pac, peripherals = true, dispatchers = [EXTI0, EXTI1, EXTI2, EXTI3])]
+#[rtic::app(device = pac, peripherals = true, dispatchers = [EXTI1, EXTI2])]
 mod app {
     use crate::display::{TC2004ADriver};
     use embedded_hal::spi::MODE_0;
@@ -147,7 +147,7 @@ mod app {
         let delay = ctx.device.TIM5.delay_us(&clocks);
         let mut display = TC2004ADriver::new(i2c, rs_pin, en_pin, delay).build();
         display.print("Not so tiny");
-        display.set_position(0, 1);
+        display.set_position(0, 2);
         display.print("reflow controller");
         display.home();
         main::spawn_after(2.secs()).unwrap();
@@ -175,26 +175,19 @@ mod app {
         )
     }
 
-    #[task(binds = EXTI4, local = [lf_pb_button], shared = [lf_pb_pressed])]
+    #[task(priority = 3, binds = EXTI4, local = [lf_pb_button], shared = [lf_pb_pressed])]
     fn lf_pb_btn_click(mut ctx: lf_pb_btn_click::Context){
         ctx.local.lf_pb_button.clear_interrupt_pending_bit();
-        defmt::info!("lf_pb_button pressed");
         ctx.shared.lf_pb_pressed.lock(|lf_pb_pressed| *lf_pb_pressed = true)
     }
 
-    #[task(binds = EXTI9_5, local = [start_stop_button, pcf8574_int_pin], shared = [start_stop_pressed, pcf8574_interrupted])]
+    #[task(priority = 3, binds = EXTI9_5, local = [start_stop_button, pcf8574_int_pin], shared = [start_stop_pressed, pcf8574_interrupted])]
     fn exti_9_5_interrupt(mut ctx: exti_9_5_interrupt::Context){
         if ctx.local.start_stop_button.check_interrupt() {
             ctx.local.start_stop_button.clear_interrupt_pending_bit();
             defmt::info!("start_stop_button pressed");
             ctx.shared.start_stop_pressed.lock(|start_stop_pressed| *start_stop_pressed = true)
         }
-        if ctx.local.pcf8574_int_pin.check_interrupt() {
-            ctx.local.pcf8574_int_pin.clear_interrupt_pending_bit();
-            defmt::info!("pcf8574 interrupt received");
-            ctx.shared.pcf8574_interrupted.lock(|pcf8574_interrupted| *pcf8574_interrupted = true)
-        }
-
     }
 
     #[task(priority = 2, shared = [temp], local = [spi, cs_pin])]
@@ -208,7 +201,7 @@ mod app {
         let input_is_open = (spi_value[0] & 0x4) >> 2;
         let temp_part = ((spi_value[0] & 0x7FF8) >> 3) as f32;
         if input_is_open == 0 {
-            ctx.shared.temp.lock(|temp| *temp = 1023.75 * temp_part / 32760.0);
+            ctx.shared.temp.lock(|temp| *temp = temp_part / 3.865546218);
         }
     }
 
@@ -237,12 +230,14 @@ mod app {
                 if *pressed {
                     switch_status = SwitchEnum::One;
                     *pressed = false;
+                    defmt::info!("start stop button pressed");
                 }
             });
             ctx.shared.lf_pb_pressed.lock(|pressed| {
                 if *pressed {
                     switch_status = SwitchEnum::Two;
                     *pressed = false;
+                    defmt::info!("lf pb button pressed");
                 }
             });
             if monotonics::now() > next_read {
@@ -269,7 +264,7 @@ mod app {
                         ReflowProfileEnum::LeadFree => { ctx.local.display.print("LF"); }
                         ReflowProfileEnum::Leaded => { ctx.local.display.print("PB"); }
                     }
-                    ctx.local.display.set_position(0, 1);
+                    ctx.local.display.set_position(0, 2);
                     ctx.shared.temp.lock(|temp| {
                         temp_local = *temp;
                     });
