@@ -112,12 +112,6 @@ pub enum Lines {
     FourLines = 0x0C,
 }
 
-#[repr(u8)]
-pub enum Dots {
-    FiveTimesTen = 0x04,
-    FiveTimesEight = 0x00
-}
-
 /// One of the most popular sizes for this kind of LCD is 16x2
 const DEFAULT_COLS: u8 = 20;
 
@@ -137,9 +131,7 @@ pub struct TC2004ADriver<RS, EN, D, I> {
     display_func: u8,
     display_mode: u8,
     display_ctrl: u8,
-    offsets: [u8; 4],
-    num_lines: u8,
-    cols: u8
+    offsets: [u8; 4]
 }
 
 impl<RS, EN, D, I> TC2004ADriver<RS, EN, D, I> where
@@ -153,9 +145,7 @@ impl<RS, EN, D, I> TC2004ADriver<RS, EN, D, I> where
             display_func: DEFAULT_DISPLAY_FUNC,
             display_mode: DEFAULT_DISPLAY_MODE,
             display_ctrl: DEFAULT_DISPLAY_CTRL,
-            offsets: [0x00, 0x40, 0x00 + DEFAULT_COLS, 0x40 + DEFAULT_COLS],
-            num_lines: 4,
-            cols: 20
+            offsets: [0x00, 0x40, 0x00 + DEFAULT_COLS, 0x40 + DEFAULT_COLS]
         }
     }
 

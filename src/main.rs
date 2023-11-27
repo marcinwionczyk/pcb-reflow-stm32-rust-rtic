@@ -84,7 +84,7 @@ mod app {
         start_stop_pressed: bool,
         lf_pb_pressed: bool,
         pcf8574_interrupted: bool,
-        temp: f32
+        temp: f32,
     }
 
     // Local resources go here
@@ -97,7 +97,7 @@ mod app {
         led_pin: PA11<Output>,
         cs_pin: PA4<Output>,
         spi: Spi<SPI1, false, u16>,
-        display: TC2004ADriver<Pin<'C', 14, Output>, Pin<'C', 13, Output>, DelayUs<TIM5>, I2c<I2C1>>
+        display: TC2004ADriver<Pin<'C', 14, Output>, Pin<'C', 13, Output>, DelayUs<TIM5>, I2c<I2C1>>,
     }
 
     #[init]
@@ -141,9 +141,9 @@ mod app {
 
         let scl = gpiob.pb6.into_alternate_open_drain();
         let sda = gpiob.pb7.into_alternate_open_drain();
-        let i2c = ctx.device.I2C1.i2c( (scl, sda),
-                                       i2c::Mode::Standard { frequency: 50.kHz()},
-                                       &clocks);
+        let i2c = ctx.device.I2C1.i2c((scl, sda),
+                                      i2c::Mode::Standard { frequency: 50.kHz() },
+                                      &clocks);
         let delay = ctx.device.TIM5.delay_us(&clocks);
         let mut display = TC2004ADriver::new(i2c, rs_pin, en_pin, delay).build();
         display.print("Not so tiny");
@@ -156,11 +156,11 @@ mod app {
         defmt::info!("init done!");
         (
             Shared {
-               start_stop_pressed: false,
-               lf_pb_pressed: false,
-               pcf8574_interrupted: false,
-               temp: 0.0
-               // Initialization of shared resources go here
+                start_stop_pressed: false,
+                lf_pb_pressed: false,
+                pcf8574_interrupted: false,
+                temp: 0.0,
+                // Initialization of shared resources go here
             },
             Local {
                 start_stop_button,
@@ -170,7 +170,7 @@ mod app {
                 led_pin,
                 cs_pin,
                 spi,
-                display
+                display,
                 // Initialization of local resources go here
             },
             init::Monotonics(mono),
@@ -178,7 +178,7 @@ mod app {
     }
 
     #[task(priority = 3, binds = EXTI4, local = [lf_pb_button], shared = [lf_pb_pressed])]
-    fn lf_pb_btn_click(mut ctx: lf_pb_btn_click::Context){
+    fn lf_pb_btn_click(mut ctx: lf_pb_btn_click::Context) {
         if ctx.local.lf_pb_button.check_interrupt() {
             ctx.local.lf_pb_button.clear_interrupt_pending_bit();
             ctx.shared.lf_pb_pressed.lock(|lf_pb_pressed| *lf_pb_pressed = true);
@@ -186,7 +186,7 @@ mod app {
     }
 
     #[task(priority = 3, binds = EXTI9_5, local = [start_stop_button, pcf8574_int_pin], shared = [start_stop_pressed, pcf8574_interrupted])]
-    fn exti_9_5_interrupt(mut ctx: exti_9_5_interrupt::Context){
+    fn exti_9_5_interrupt(mut ctx: exti_9_5_interrupt::Context) {
         if ctx.local.start_stop_button.check_interrupt() {
             ctx.local.start_stop_button.clear_interrupt_pending_bit();
             ctx.shared.start_stop_pressed.lock(|start_stop_pressed| *start_stop_pressed = true);
@@ -201,7 +201,7 @@ mod app {
         ctx.local.cs_pin.set_high();
 
         let input_is_open = (spi_value[0] & 0x4) >> 2;
-        let temp_part = (spi_value[0] >> 3) as f32;
+        let temp_part = ((spi_value[0] & 0x7FF8) >> 3) as f32;
         if input_is_open == 0 {
             ctx.shared.temp.lock(|temp| *temp = temp_part / 4.0);
         }
@@ -225,9 +225,145 @@ mod app {
         let mut update_lcd = monotonics::now();
         let mut window_start_time = monotonics::now();
         let mut timer_soak = monotonics::now();
+        let mut switch_status = SwitchEnum::None;
 
         loop {
-            let mut switch_status = SwitchEnum::None;
+            if monotonics::now() > next_read {
+                next_read += 1.secs();
+                read_temp::spawn().unwrap();
+            }
+            if monotonics::now() > next_check {
+                next_check += 1.secs();
+                match reflow_status {
+                    ReflowStatusEnum::On => {
+                        ctx.local.led_pin.toggle();
+                        defmt::info!("{}, {}, {}", set_point, temp_local, output.output);
+                    }
+                    ReflowStatusEnum::Off => {
+                        ctx.local.led_pin.set_low()
+                    }
+                }
+            }
+            if monotonics::now() > update_lcd {
+                // Update LCD in the next 100 ms
+                update_lcd += 100.millis();
+                // Clear LCD
+                ctx.local.display.clear();
+                // Print current system state
+                ctx.local.display.print(LCD_MESSAGES_REFLOW_STATUS[reflow_state as usize]);
+                ctx.local.display.set_position(18, 0);
+                match reflow_profile {
+                    ReflowProfileEnum::LeadFree => { ctx.local.display.print("LF"); }
+                    ReflowProfileEnum::Leaded => { ctx.local.display.print("PB"); }
+                }
+                ctx.local.display.set_position(0, 2);
+                ctx.shared.temp.lock(|temp| {
+                    temp_local = *temp;
+                });
+                let mut s: String<20> = String::new();
+                let temp_write = uFmt_f32::One(temp_local);
+                uwrite!(&mut s, "{}", temp_write).unwrap();
+                ctx.local.display.print(s.as_str());
+                ctx.local.display.write(0xDF);
+                ctx.local.display.write('C' as u8);
+            }
+            match reflow_state {
+                ReflowStateEnum::Idle => {
+                    if temp_local >= TEMPERATURE_ROOM {
+                        reflow_state = ReflowStateEnum::TooHot;
+                    } else {
+                        if switch_status == SwitchEnum::One {
+                            defmt::info!("Setpoint, Input, Output");
+                            window_start_time = monotonics::now();
+                            set_point = TEMPERATURE_SOAK_MIN;
+                            match reflow_profile {
+                                ReflowProfileEnum::LeadFree => {
+                                    soak_temperature_max = TEMPERATURE_SOAK_MAX_LF;
+                                    reflow_temperature_max = TEMPERATURE_REFLOW_MAX_LF;
+                                    soak_micro_period = SOAK_MICRO_PERIOD_LF.micros();
+                                }
+                                ReflowProfileEnum::Leaded => {
+                                    soak_temperature_max = TEMPERATURE_SOAK_MAX_PB;
+                                    reflow_temperature_max = TEMPERATURE_REFLOW_MAX_PB;
+                                    soak_micro_period = SOAK_MICRO_PERIOD_PB.micros();
+                                }
+                            }
+                            pid = Pid::new(set_point, window_size);
+                            pid.kp = PID_KP_PREHEAT;
+                            pid.kd = PID_KD_PREHEAT;
+                            pid.ki = PID_KI_PREHEAT;
+                            reflow_state = ReflowStateEnum::Preheat;
+                        }
+                    }
+                }
+                ReflowStateEnum::Preheat => {
+                    reflow_status = ReflowStatusEnum::On;
+                    if temp_local > TEMPERATURE_SOAK_MIN {
+                        timer_soak = monotonics::now() + soak_micro_period;
+                        pid.kp = PID_KP_SOAK;
+                        pid.ki = PID_KI_SOAK;
+                        pid.kd = PID_KD_SOAK;
+                        pid.setpoint = TEMPERATURE_SOAK_MIN + SOAK_TEMPERATURE_STEP;
+                        reflow_state = ReflowStateEnum::Soak;
+                    }
+                }
+                ReflowStateEnum::Soak => {
+                    if monotonics::now() > timer_soak {
+                        timer_soak = monotonics::now() + soak_micro_period;
+                        set_point += SOAK_TEMPERATURE_STEP;
+                        if set_point > soak_temperature_max {
+                            pid.kp = PID_KP_REFLOW;
+                            pid.ki = PID_KI_REFLOW;
+                            pid.kd = PID_KD_REFLOW;
+                            pid.setpoint = reflow_temperature_max;
+                            reflow_state = ReflowStateEnum::Reflow;
+                        }
+                    }
+                }
+                ReflowStateEnum::Reflow => {
+                    if temp_local >= (reflow_temperature_max - 5.0) {
+                        pid.kp = PID_KP_REFLOW;
+                        pid.ki = PID_KI_REFLOW;
+                        pid.kd = PID_KD_REFLOW;
+                        pid.setpoint = TEMPERATURE_COOL_MIN;
+                        reflow_state = ReflowStateEnum::Cool;
+                    }
+                }
+                ReflowStateEnum::Cool => {
+                    reflow_status = ReflowStatusEnum::Off;
+                    reflow_state = ReflowStateEnum::Complete;
+                }
+                ReflowStateEnum::Complete => {
+                    reflow_state = ReflowStateEnum::Idle;
+                }
+                ReflowStateEnum::TooHot => {
+                    if temp_local < TEMPERATURE_ROOM {
+                        reflow_state = ReflowStateEnum::Idle;
+                    }
+                }
+            }
+            match switch_status {
+                SwitchEnum::None => {}
+                SwitchEnum::One => {
+                    if reflow_status == ReflowStatusEnum::On {
+                        reflow_status = ReflowStatusEnum::Off;
+                        reflow_state = ReflowStateEnum::Idle;
+                    }
+                }
+                SwitchEnum::Two => {
+                    if reflow_state == ReflowStateEnum::Idle {
+                        match reflow_profile {
+                            ReflowProfileEnum::LeadFree => {
+                                reflow_profile = ReflowProfileEnum::Leaded;
+                            }
+                            ReflowProfileEnum::Leaded => {
+                                reflow_profile = ReflowProfileEnum::LeadFree;
+                            }
+                        }
+                    }
+                }
+            }
+            switch_status = SwitchEnum::None;
             ctx.shared.start_stop_pressed.lock(|pressed| {
                 if *pressed {
                     switch_status = SwitchEnum::One;
@@ -240,158 +376,16 @@ mod app {
                     *pressed = false;
                 }
             });
-            match switch_status {
-                SwitchEnum::One => {
-                    defmt::info!("switch_enum one");
+            if reflow_status == ReflowStatusEnum::On {
+                let now = monotonics::now();
+                output = pid.next_control_output(temp_local);
+                if (now - window_start_time) > (window_size as u32).millis::<1, 1_000_000>() {
+                    window_start_time += (window_size as u32).millis::<1, 1_000_000>();
                 }
-                SwitchEnum::Two => {
-                    defmt::info!("switch_enum two");
-                }
-                _ => {}
-            }
-            if monotonics::now() > next_read {
-                next_read += 1.secs();
-                read_temp::spawn().unwrap();
-                if monotonics::now() > next_check {
-                    next_check += 1.secs();
-                    match reflow_status {
-                        ReflowStatusEnum::Off => {
-                            ctx.local.led_pin.set_low()
-                        }
-                        ReflowStatusEnum::On => {
-                            ctx.local.led_pin.toggle();
-                            defmt::info!("{}, {}, {}", set_point, temp_local, output.output);
-                        }
-                    }
-                }
-                if monotonics::now() > update_lcd {
-                    update_lcd += 100.millis();
-                    ctx.local.display.clear();
-                    ctx.local.display.print(LCD_MESSAGES_REFLOW_STATUS[reflow_state as usize]);
-                    ctx.local.display.set_position(18, 0);
-                    match reflow_profile {
-                        ReflowProfileEnum::LeadFree => { ctx.local.display.print("LF"); }
-                        ReflowProfileEnum::Leaded => { ctx.local.display.print("PB"); }
-                    }
-                    ctx.local.display.set_position(0, 2);
-                    ctx.shared.temp.lock(|temp| {
-                        temp_local = *temp;
-                    });
-                    let mut s: String<20> = String::new();
-                    let temp_write = uFmt_f32::One(temp_local);
-                    uwrite!(&mut s, "{}", temp_write).unwrap();
-                    ctx.local.display.print(s.as_str());
-                    ctx.local.display.write(0xDF);
-                    ctx.local.display.write('C' as u8);
-                }
-                match reflow_state {
-                    ReflowStateEnum::Idle => {
-                        if temp_local >= TEMPERATURE_ROOM {
-                            reflow_state = ReflowStateEnum::TooHot;
-                        } else {
-                            if switch_status == SwitchEnum::One {
-                                defmt::info!("Setpoint, Input, Output");
-                                window_start_time = monotonics::now();
-                                set_point = TEMPERATURE_SOAK_MIN;
-                                match reflow_profile {
-                                    ReflowProfileEnum::LeadFree => {
-                                        soak_temperature_max = TEMPERATURE_SOAK_MAX_LF;
-                                        reflow_temperature_max = TEMPERATURE_REFLOW_MAX_LF;
-                                        soak_micro_period = SOAK_MICRO_PERIOD_LF.micros();
-                                    }
-                                    ReflowProfileEnum::Leaded => {
-                                        soak_temperature_max = TEMPERATURE_SOAK_MAX_PB;
-                                        reflow_temperature_max = TEMPERATURE_REFLOW_MAX_PB;
-                                        soak_micro_period = SOAK_MICRO_PERIOD_PB.micros();
-                                    }
-                                }
-                                pid = Pid::new(set_point, window_size);
-                                pid.kp = PID_KP_PREHEAT;
-                                pid.kd = PID_KD_PREHEAT;
-                                pid.ki = PID_KI_PREHEAT;
-                                reflow_state = ReflowStateEnum::Preheat;
-                            }
-                        }
-                    }
-                    ReflowStateEnum::Preheat => {
-                        reflow_status = ReflowStatusEnum::On;
-                        if temp_local > TEMPERATURE_SOAK_MIN {
-                            timer_soak = monotonics::now() + soak_micro_period;
-                            pid.kp = PID_KP_SOAK;
-                            pid.ki = PID_KI_SOAK;
-                            pid.kd = PID_KD_SOAK;
-                            pid.setpoint = TEMPERATURE_SOAK_MIN + SOAK_TEMPERATURE_STEP;
-                            reflow_state = ReflowStateEnum::Soak;
-                        }
-                    }
-                    ReflowStateEnum::Soak => {
-                        if monotonics::now() > timer_soak {
-                            timer_soak = monotonics::now() + soak_micro_period;
-                            set_point += SOAK_TEMPERATURE_STEP;
-                            if set_point > soak_temperature_max {
-                                pid.kp = PID_KP_REFLOW;
-                                pid.ki = PID_KI_REFLOW;
-                                pid.kd = PID_KD_REFLOW;
-                                pid.setpoint = reflow_temperature_max;
-                                reflow_state = ReflowStateEnum::Reflow;
-                            }
-                        }
-                    }
-                    ReflowStateEnum::Reflow => {
-                        if temp_local >= (reflow_temperature_max - 5.0) {
-                            pid.kp = PID_KP_REFLOW;
-                            pid.ki = PID_KI_REFLOW;
-                            pid.kd = PID_KD_REFLOW;
-                            pid.setpoint = TEMPERATURE_COOL_MIN;
-                            reflow_state = ReflowStateEnum::Cool;
-                        }
-                    }
-                    ReflowStateEnum::Cool => {
-                        reflow_status = ReflowStatusEnum::Off;
-                        reflow_state = ReflowStateEnum::Complete;
-                    }
-                    ReflowStateEnum::Complete => {
-                        reflow_state = ReflowStateEnum::Idle;
-                    }
-                    ReflowStateEnum::TooHot => {
-                        if temp_local < TEMPERATURE_ROOM {
-                            reflow_state = ReflowStateEnum::Idle;
-                        }
-                    }
-                }
-                match switch_status {
-                    SwitchEnum::None => {}
-                    SwitchEnum::One => {
-                        if reflow_status == ReflowStatusEnum::On {
-                            reflow_status = ReflowStatusEnum::Off;
-                            reflow_state = ReflowStateEnum::Idle;
-                        }
-                    }
-                    SwitchEnum::Two => {
-                        if reflow_state == ReflowStateEnum::Idle {
-                            match reflow_profile {
-                                ReflowProfileEnum::LeadFree => {
-                                    reflow_profile = ReflowProfileEnum::Leaded;
-                                }
-                                ReflowProfileEnum::Leaded => {
-                                    reflow_profile = ReflowProfileEnum::LeadFree;
-                                }
-                            }
-                        }
-                    }
-                }
-                if reflow_status == ReflowStatusEnum::On {
-                    let now = monotonics::now();
-                    output = pid.next_control_output(temp_local);
-                    if (now - window_start_time) > (window_size as u32).millis::<1, 1_000_000>() {
-                        window_start_time += (window_size as u32).millis::<1, 1_000_000>();
-                    }
-                    if (output.output as u32).millis::<1, 1_000_000>() > (now - window_start_time) {
-                        ctx.local.ssr_pin.set_high();
-                    } else {
-                        ctx.local.ssr_pin.set_low();
-                    }
-
+                if (output.output as u32).millis::<1, 1_000_000>() > (now - window_start_time) {
+                    ctx.local.ssr_pin.set_high();
+                } else {
+                    ctx.local.ssr_pin.set_low();
                 }
             }
         }
