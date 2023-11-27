@@ -91,7 +91,6 @@ pub enum Scroll {
 #[repr(u8)]
 pub enum Mode {
     /// Use eight-bit bus (Set by [with_full_bus][LcdDisplay::with_full_bus])
-    FourBits = 0x00,
     EightBits = 0x10, // LCD_8BITMODE
 }
 
@@ -107,8 +106,8 @@ pub enum Lines {
     /// two line mode is needed. According to HHD44780 documentation, when two-line display mode is
     /// used, the bit that specifies font size is ignored. Because of that, we can use it to
     /// differentiate between four line mode and two line mode.
-    OneLine = 0x00,
-    TwoLines = 0x08,
+    //OneLine = 0x00,
+    //TwoLines = 0x08,
     FourLines = 0x0C,
 }
 
