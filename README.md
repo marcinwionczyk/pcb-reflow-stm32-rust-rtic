@@ -5,6 +5,15 @@
 Rust code for STM32F411RCT6 microcontroller to drive PCB reflow solder plate.
 Code is based on https://github.com/gabrielvegamotta/PCB-Reflow/blob/main/V1-Arduino-PTH/Firmware/PCB_Reflow_V1.6.ino
 
+In order to build it, you need to prepare your environment according to:
+https://docs.rust-embedded.org/book/intro/install.html
+
+and issue a command within this folder:
+- `cargo build --release` for release version
+- `cargo build` for unoptimised, debug version
+
+Then you may run software on microcontroller with `cargo run` and flash it with 
+`cargo flash --release --chip STM32F411RCT6x`  
 ## Hardware
 
 The whole setup look like this:
