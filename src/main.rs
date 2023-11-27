@@ -125,7 +125,8 @@ mod app {
         lf_pb_button.enable_interrupt(&mut ctx.device.EXTI);
         lf_pb_button.trigger_on_edge(&mut ctx.device.EXTI, Edge::Falling);
 
-        let ssr_pin = gpioa.pa12.into_push_pull_output();
+        let mut ssr_pin = gpioa.pa12.into_push_pull_output().speed(Speed::VeryHigh);
+        ssr_pin.set_low();
         let mut led_pin = gpioa.pa11.into_push_pull_output();
         led_pin.set_high();
         let mut cs_pin = gpioa.pa4.into_push_pull_output();
@@ -289,9 +290,10 @@ mod app {
                                 }
                             }
                             pid = Pid::new(set_point, window_size);
-                            pid.kp = PID_KP_PREHEAT;
-                            pid.kd = PID_KD_PREHEAT;
-                            pid.ki = PID_KI_PREHEAT;
+                            defmt::debug!("pid created: {}", pid);
+                            pid.p(PID_KP_PREHEAT, window_size)
+                                .d(PID_KD_PREHEAT, window_size)
+                                .i(PID_KI_PREHEAT, window_size);
                             reflow_state = ReflowStateEnum::Preheat;
                         }
                     }
@@ -300,10 +302,10 @@ mod app {
                     reflow_status = ReflowStatusEnum::On;
                     if temp_local > TEMPERATURE_SOAK_MIN {
                         timer_soak = monotonics::now() + soak_micro_period;
-                        pid.kp = PID_KP_SOAK;
-                        pid.ki = PID_KI_SOAK;
-                        pid.kd = PID_KD_SOAK;
-                        pid.setpoint = TEMPERATURE_SOAK_MIN + SOAK_TEMPERATURE_STEP;
+                        pid.p(PID_KP_SOAK, window_size)
+                            .i(PID_KI_SOAK, window_size)
+                            .d(PID_KD_SOAK, window_size)
+                            .setpoint(TEMPERATURE_SOAK_MIN + SOAK_TEMPERATURE_STEP);
                         reflow_state = ReflowStateEnum::Soak;
                     }
                 }
@@ -312,20 +314,20 @@ mod app {
                         timer_soak = monotonics::now() + soak_micro_period;
                         set_point += SOAK_TEMPERATURE_STEP;
                         if set_point > soak_temperature_max {
-                            pid.kp = PID_KP_REFLOW;
-                            pid.ki = PID_KI_REFLOW;
-                            pid.kd = PID_KD_REFLOW;
-                            pid.setpoint = reflow_temperature_max;
+                            pid.p(PID_KP_REFLOW, window_size)
+                                .i(PID_KI_REFLOW, window_size)
+                                .d(PID_KD_REFLOW, window_size)
+                                .setpoint(reflow_temperature_max);
                             reflow_state = ReflowStateEnum::Reflow;
                         }
                     }
                 }
                 ReflowStateEnum::Reflow => {
                     if temp_local >= (reflow_temperature_max - 5.0) {
-                        pid.kp = PID_KP_REFLOW;
-                        pid.ki = PID_KI_REFLOW;
-                        pid.kd = PID_KD_REFLOW;
-                        pid.setpoint = TEMPERATURE_COOL_MIN;
+                        pid.p(PID_KP_REFLOW, window_size)
+                        .i(PID_KI_REFLOW, window_size)
+                        .d(PID_KD_REFLOW, window_size)
+                        .setpoint(TEMPERATURE_COOL_MIN);
                         reflow_state = ReflowStateEnum::Cool;
                     }
                 }
@@ -383,6 +385,7 @@ mod app {
                     window_start_time += (window_size as u32).millis::<1, 1_000_000>();
                 }
                 if (output.output as u32).millis::<1, 1_000_000>() > (now - window_start_time) {
+                    defmt::debug!("setting ssr pin high");
                     ctx.local.ssr_pin.set_high();
                 } else {
                     ctx.local.ssr_pin.set_low();

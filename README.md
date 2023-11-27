@@ -40,4 +40,5 @@ PCB was designed with Autodesk EAGLE.
 - [schematics](./docs/hardware/mainboard_v3.sch)
 - [PCB project](./docs/hardware/mainboard_v3.brd)
 
+I power it with +12V DC.
 If you want to order a PCB, here you have [gerber files](./docs/hardware/mainboard_v3_2023-11-27.zip)
