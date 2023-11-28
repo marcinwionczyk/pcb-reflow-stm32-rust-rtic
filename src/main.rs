@@ -386,7 +386,7 @@ mod app {
                 }
                 if (output.output as u32).millis::<1, 1_000_000>() > (now - window_start_time) {
                     defmt::debug!("setting ssr pin high");
-                    ctx.local.ssr_pin.set_high();
+                    ctx.local.ssr_pin.toggle();
                 } else {
                     ctx.local.ssr_pin.set_low();
                 }
