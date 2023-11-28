@@ -1,8 +1,6 @@
 # pcb-reflow-stm32-rust-rtic
-
 This is how the reflow process look like:
-<iframe width="560" height="315" src="https://www.youtube.com/embed/pWV79pceqmc?si=j8JmYhKql-1J7g1G" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-
+https://youtu.be/pWV79pceqmc?si=kS1UuS4xw2wpDsws
 
 ## Software
 
