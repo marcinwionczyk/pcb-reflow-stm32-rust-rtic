@@ -1,5 +1,10 @@
 # pcb-reflow-stm32-rust-rtic
 
+Software probably is ok. I need to fix hardware issues with thermocouple temperature readings. It is too low.
+When infrared thermometer showed 200°C, I was sensing via MAX6675 temperature around 100°C.
+
+In the worst case scenario I would have to do some correcting function.
+
 ## Software
 
 Rust code for STM32F411RCT6 microcontroller to drive PCB reflow solder plate.
