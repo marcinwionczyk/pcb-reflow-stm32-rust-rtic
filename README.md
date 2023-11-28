@@ -1,9 +1,8 @@
 # pcb-reflow-stm32-rust-rtic
 
-Software probably is ok. I need to fix hardware issues with thermocouple temperature readings. It is too low.
-When infrared thermometer showed 200°C, I was sensing via MAX6675 temperature around 100°C.
+This is how the reflow process look like:
+<iframe width="560" height="315" src="https://www.youtube.com/embed/pWV79pceqmc?si=j8JmYhKql-1J7g1G" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
-In the worst case scenario I would have to do some correcting function.
 
 ## Software
 
@@ -23,10 +22,6 @@ and issue a command within this folder:
 Then you may run software on microcontroller with `cargo run` and flash it via STLink device with 
 `cargo flash --release --chip STM32F411RCT6x`  
 ## Hardware
-
-The whole setup look like this:
-<img src="./docs/images/setup.jpg">
-
 This is how the PCB top layer look like:
 <img src="./docs/hardware/mainboard_v3_top.png">
 
