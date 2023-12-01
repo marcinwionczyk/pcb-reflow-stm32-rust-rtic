@@ -227,6 +227,7 @@ mod app {
         let mut window_start_time = monotonics::now();
         let mut timer_soak = monotonics::now();
         let mut switch_status = SwitchEnum::None;
+        let mut ssr_counter: u8 = 0;
 
         loop {
             if monotonics::now() > next_read {
@@ -259,7 +260,8 @@ mod app {
                 }
                 ctx.local.display.set_position(0, 2);
                 ctx.shared.temp.lock(|temp| {
-                    temp_local = *temp;
+                    // temperature adjusting function
+                    temp_local = (-0.002634 * (*temp) * (*temp)) + (1.725721 * (*temp)) - 13.53099;
                 });
                 let mut s: String<20> = String::new();
                 let temp_write = uFmt_f32::One(temp_local);
@@ -386,7 +388,14 @@ mod app {
                 }
                 if (output.output as u32).millis::<1, 1_000_000>() > (now - window_start_time) {
                     defmt::debug!("setting ssr pin high");
-                    ctx.local.ssr_pin.toggle();
+                    // ssr_counter is to slow down heating process
+                    ssr_counter += 1;
+                    if ssr_counter > 5 {
+                        ctx.local.ssr_pin.set_high();
+                        ssr_counter = 0;
+                    } else {
+                        ctx.local.ssr_pin.set_low();
+                    }
                 } else {
                     ctx.local.ssr_pin.set_low();
                 }
