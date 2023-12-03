@@ -32,6 +32,7 @@ mod app {
     use pid::*;
     use ufmt::uwrite;
     use ufmt_float::uFmt_f32;
+    use micromath::F32;
     use heapless::String;
 
     #[derive(PartialEq, Clone, Copy)]
@@ -84,7 +85,7 @@ mod app {
         start_stop_pressed: bool,
         lf_pb_pressed: bool,
         pcf8574_interrupted: bool,
-        temp: f32,
+        temp: F32,
     }
 
     // Local resources go here
@@ -160,7 +161,7 @@ mod app {
                 start_stop_pressed: false,
                 lf_pb_pressed: false,
                 pcf8574_interrupted: false,
-                temp: 0.0,
+                temp: F32(0.0),
                 // Initialization of shared resources go here
             },
             Local {
@@ -202,7 +203,7 @@ mod app {
         ctx.local.cs_pin.set_high();
 
         let input_is_open = (spi_value[0] & 0x4) >> 2;
-        let temp_part = ((spi_value[0] & 0x7FF8) >> 3) as f32;
+        let temp_part = F32(((spi_value[0] & 0x7FF8) >> 3) as f32);
         if input_is_open == 0 {
             ctx.shared.temp.lock(|temp| *temp = temp_part / 4.0);
         }
@@ -239,7 +240,7 @@ mod app {
                 match reflow_status {
                     ReflowStatusEnum::On => {
                         ctx.local.led_pin.toggle();
-                        defmt::info!("{}, {}, {}", set_point, temp_local, output.output);
+                        defmt::info!("{}, {}, {}", set_point, f32::from(temp_local), output.output);
                     }
                     ReflowStatusEnum::Off => {
                         ctx.local.led_pin.set_low()
@@ -261,10 +262,10 @@ mod app {
                 ctx.local.display.set_position(0, 2);
                 ctx.shared.temp.lock(|temp| {
                     // temperature adjusting function
-                    temp_local = (-0.002634 * (*temp) * (*temp)) + (1.725721 * (*temp)) - 13.53099;
+                    temp_local = f32::from(F32(-0.002634) * (*temp).powi(2) + (*temp).mul_add(F32(1.725721), F32(13.53099)));
                 });
                 let mut s: String<20> = String::new();
-                let temp_write = uFmt_f32::One(temp_local);
+                let temp_write = uFmt_f32::One(temp_local as f32);
                 uwrite!(&mut s, "{}", temp_write).unwrap();
                 ctx.local.display.print(s.as_str());
                 ctx.local.display.write(0xDF);
@@ -382,7 +383,7 @@ mod app {
             });
             if reflow_status == ReflowStatusEnum::On {
                 let now = monotonics::now();
-                output = pid.next_control_output(temp_local);
+                output = pid.next_control_output(temp_local as f32);
                 if (now - window_start_time) > (window_size as u32).millis::<1, 1_000_000>() {
                     window_start_time += (window_size as u32).millis::<1, 1_000_000>();
                 }
